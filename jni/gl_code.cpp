@@ -26,8 +26,10 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
-#include <matrix.h>
+#include "matrix.h"
+#include "mesh.h"
 
+#define USE_MESH 0 //switch to 1 to see mesh in action
 #define  LOG_TAG    "libspinningcube"
 #define  LOGI(...)  __android_log_print(ANDROID_LOG_INFO,LOG_TAG,__VA_ARGS__)
 #define  LOGE(...)  __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,__VA_ARGS__)
@@ -117,6 +119,7 @@ GLuint gmvP;
 int iXangle = 0, iYangle = 0, iZangle = 0;
 float aRotate[16], aModelView[16], aPerspective[16], aMVP[16];
 float uiWidth = 0.0f; float uiHeight = 0.0f;
+static cMesh *gpMesh=NULL;
 
 /* simple stats management */
 typedef struct {
@@ -369,17 +372,13 @@ bool setupGraphics(int w, int h) {
     checkGlError("glGetAttribLocation");
     LOGI("glGetAttribLocation(\"vPosition\") = %d\n", gvPositionHandle);
 
-    //gvBarPositionHandle = glGetAttribLocation(gProgram, "vBarPosition");
-    //checkGlError("glGetAttribLocation");
-    //LOGI("glGetAttribLocation(\"vBarPosition\") = %d\n", gvBarPositionHandle);
-
     gvColorHandle = glGetAttribLocation(gProgram, "vColor");
     checkGlError("glGetAttribLocation");
     LOGI("glGetAttribLocation(\"vColor\") = %d\n", gvColorHandle);
 
-    gIntensityHandle = glGetAttribLocation(gProgram, "intensity");
-    checkGlError("glGetAttribLocation");
-    LOGI("glGetAttribLocation(\"intensity\") = %d\n", gIntensityHandle);
+    //gIntensityHandle = glGetAttribLocation(gProgram, "intensity");
+    //checkGlError("glGetAttribLocation");
+    //LOGI("glGetAttribLocation(\"intensity\") = %d\n", gIntensityHandle);
 
     gmvP = glGetUniformLocation(gProgram, "mvp");
     checkGlError("glGetUniformLocation");
@@ -387,48 +386,53 @@ bool setupGraphics(int w, int h) {
 
     glViewport(0, 0, w, h);
     checkGlError("glViewport");
-
+#if !USE_MESH
     glEnable(GL_CULL_FACE);
+#endif
     glEnable(GL_DEPTH_TEST);
 
+    //create a mesh
+    gpMesh = new cMesh;
+    gpMesh->buildPlane(3,2,3,2);
+    gpMesh->computeVerticesNormals();
     return true;
 }
 
 void renderFrame() {
-    static float grey;
-    grey += 0.01f;
-    if (grey > 1.0f) {
-        grey = 0.0f;
-    }
-    glClearColor(grey, grey, grey, 1.0f);
-    checkGlError("glClearColor");
-    glClear( GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-    checkGlError("glClear");
+	static float grey;
+	grey += 0.01f;
+	if (grey > 1.0f) {
+		grey = 0.0f;
+	}
+	glClearColor(grey, grey, grey, 1.0f);
+	checkGlError("glClearColor");
+	glClear( GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+	checkGlError("glClear");
 
-    glUseProgram(gProgram);
-    checkGlError("glUseProgram");
+	glUseProgram(gProgram);
+	checkGlError("glUseProgram");
 
-    glVertexAttribPointer(gvPositionHandle, 3, GL_FLOAT, GL_FALSE, 0, gCubeVertices);
-    checkGlError("glVertexAttribPointer");
+	#if USE_MESH
+	glVertexAttribPointer(gvPositionHandle, 4, GL_FLOAT, GL_FALSE, 0, gpMesh->m_pTriangleList);
+	#else
+	glVertexAttribPointer(gvPositionHandle, 3, GL_FLOAT, GL_FALSE, 0, gCubeVertices);
+	#endif
+
+	glEnableVertexAttribArray(gvPositionHandle);
+	checkGlError("glEnableVertexAttribArray");
+
+	#if USE_MESH
+	glVertexAttribPointer(gvColorHandle, 3, GL_FLOAT, GL_FALSE, 0, gCubeColors); // <-hack! only works for 3X2 mesh
+	checkGlError("glVertexAttribPointer");
+	#else
+	glVertexAttribPointer(gvColorHandle, 3, GL_FLOAT, GL_FALSE, 0, gCubeColors);
+	checkGlError("glVertexAttribPointer");
+	#endif
+
+	glEnableVertexAttribArray(gvColorHandle);
+	checkGlError("glEnableVertexAttribArray");
+
     
-    glEnableVertexAttribArray(gvPositionHandle);
-    checkGlError("glEnableVertexAttribArray");
-
-    glVertexAttribPointer(gvColorHandle, 3, GL_FLOAT, GL_FALSE, 0, gCubeColors);
-    checkGlError("glVertexAttribPointer");
-    
-    //glVertexAttribPointer(gvBarPositionHandle, 3, GL_FLOAT, GL_FALSE, 0, gBarVertices);
-    //checkGlError("glVertexAttribPointer");
-    
-    //glEnableVertexAttribArray(gvBarPositionHandle);
-    //checkGlError("glEnableVertexAttribArray");
-
-    glEnableVertexAttribArray(gvColorHandle);
-    checkGlError("glEnableVertexAttribArray");
-
-    glUniform1f(gIntensityHandle, (1.0 - grey));
-    checkGlError("glUniform1f");
-
 	//rotate - begin
 	rotate_matrix(iXangle, 1.0, 0.0, 0.0, aModelView);
 	rotate_matrix(iYangle, 0.0, 1.0, 0.0, aRotate);
@@ -439,7 +443,7 @@ void renderFrame() {
 
 	multiply_matrix(aRotate, aModelView, aModelView);
 
-		/* Pull the camera back from the cube */
+	/* Pull the camera back from the cube */
 	aModelView[14] -= 2.5;
 
 	perspective_matrix(45.0, (double)uiWidth/(double)uiHeight, 0.01, 100.0, aPerspective);
@@ -447,7 +451,7 @@ void renderFrame() {
 
 	glUniformMatrix4fv(gmvP, 1, GL_FALSE, aMVP);
 
-		iXangle += 3;
+	iXangle += 3;
 	iYangle += 2;
 
 	if(iXangle >= 360) iXangle -= 360;
@@ -457,9 +461,12 @@ void renderFrame() {
 	if(iZangle >= 360) iZangle -= 360;
 	if(iZangle < 0) iZangle += 360;
 	//rotate - end
-    glDrawArrays(GL_TRIANGLES, 0, 36);
-    
-    checkGlError("glDrawArrays");
+#if USE_MESH
+	glDrawArrays(GL_TRIANGLES, 0, gpMesh->m_numTriangles);
+#else
+	glDrawArrays(GL_TRIANGLES, 0, 36);
+#endif
+	checkGlError("glDrawArrays");
 }
 static Stats stats;
 extern "C" {
