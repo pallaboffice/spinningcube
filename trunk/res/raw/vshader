@@ -5,6 +5,6 @@ uniform mat4 mvp;
 varying vec3 vvColor;
 void main() 
 {
-    vvColor = vColor;
+    vvColor = vColor.xyz;
     gl_Position = mvp * vPosition;
 }
