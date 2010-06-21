@@ -19,8 +19,12 @@
 
 #ifndef _MESH_H
 #define _MESH_H
+#include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
+#include <time.h>
 #include "vec4.h"
+
 
 struct sFaceU16
 {
@@ -72,7 +76,7 @@ public:
 	void ComputeTriangleData();
 	void ComputeQuadData();
 
-	void setVerticesColor( float r, float g, float b);
+	void setVerticesColor();
 	void computeVerticesNormals();
 
 	//void buildTorus( float radius, float section_radius, int vertex_density );

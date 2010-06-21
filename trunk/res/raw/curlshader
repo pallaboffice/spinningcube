@@ -1,0 +1,33 @@
+attribute vec4 vPosition;
+attribute vec3 vColor;
+uniform mat4 mvp;
+
+uniform float  A; //supplied by user
+uniform float  theta; //supplied by user
+
+varying vec3 vvColor;
+
+void main()
+{
+	vec4  temp;   // First stage of the deformation
+	// Radius of the circle circumscribed by vertex [vPosition.x, vPosition.y] around A on the xy plane
+	float diff = (vPosition.y - A);
+	float R     = sqrt( (vPosition.x * vPosition.x) +  diff*diff ); 
+	
+	
+	// Now get the radius of the cone cross section intersected by our vertex in 3D space.
+	float r     = R * sin(theta);                       
+	
+	// Angle subtended by arc |ST| on the cone cross section.
+	float beta  = asin(vPosition.x / R) / sin(theta);       
+
+	//MAGIC!!!
+	temp.x  = r * sin(beta);
+	temp.y  = R + A;
+	temp.y  = temp.y - (r * (1.0 - cos(beta)) * sin(theta)); 
+	temp.z  = r * (1.0 - cos(beta)) * cos(theta);
+	temp.w = 1.0;
+	
+	vvColor = vColor.xyz;
+	gl_Position = mvp * temp;
+}

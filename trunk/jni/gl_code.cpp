@@ -28,6 +28,8 @@
 #include <time.h>
 #include "matrix.h"
 #include "mesh.h"
+#include "CubeData.h"
+#include "Stats.h"
 
 #define USE_MESH 0 //switch to 1 to see mesh in action
 #define  LOG_TAG    "libspinningcube"
@@ -47,6 +49,7 @@ static void checkGlError(const char* op) {
 }
 static const char *gVertexShader = NULL;
 static const char *gFragmentShader  = NULL;
+static Stats stats;
 
 GLuint loadShader(GLenum shaderType, const char* pSource) {
     GLuint shader = glCreateShader(shaderType);
@@ -114,246 +117,13 @@ GLuint createProgram(const char* pVertexSource, const char* pFragmentSource) {
 
 GLuint gProgram;
 GLuint gvPositionHandle, gvBarPositionHandle, gvColorHandle;
-GLuint gIntensityHandle;
+GLuint gThetaHandle, gAHandle;
 GLuint gmvP;
 int iXangle = 0, iYangle = 0, iZangle = 0;
 float aRotate[16], aModelView[16], aPerspective[16], aMVP[16];
 float uiWidth = 0.0f; float uiHeight = 0.0f;
+float animParam = 1.0;
 static cMesh *gpMesh=NULL;
-
-/* simple stats management */
-typedef struct {
-    double  renderTime;
-    double  frameTime;
-} FrameStats;
-
-#define  MAX_FRAME_STATS  200
-#define  MAX_PERIOD_MS    1500
-
-typedef struct {
-    double  firstTime;
-    double  lastTime;
-    double  frameTime;
-
-    int         firstFrame;
-    int         numFrames;
-    FrameStats  frames[ MAX_FRAME_STATS ];
-} Stats;
-
-/* Return current time in milliseconds */
-static double now_ms(void)
-{
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec*1000. + tv.tv_usec/1000.;
-}
-
-static void
-stats_init( Stats*  s )
-{
-    s->lastTime = now_ms();
-    s->firstTime = 0.;
-    s->firstFrame = 0;
-    s->numFrames  = 0;
-}
-
-static void
-stats_startFrame( Stats*  s )
-{
-    s->frameTime = now_ms();
-}
-
-static void
-stats_endFrame( Stats*  s )
-{
-    double now = now_ms();
-    double renderTime = now - s->frameTime;
-    double frameTime  = now - s->lastTime;
-    int nn;
-
-    if (now - s->firstTime >= MAX_PERIOD_MS) {
-        if (s->numFrames > 0) {
-            double minRender, maxRender, avgRender;
-            double minFrame, maxFrame, avgFrame;
-            int count;
-
-            nn = s->firstFrame;
-            minRender = maxRender = avgRender = s->frames[nn].renderTime;
-            minFrame  = maxFrame  = avgFrame  = s->frames[nn].frameTime;
-            for (count = s->numFrames; count > 0; count-- ) {
-                nn += 1;
-                if (nn >= MAX_FRAME_STATS)
-                    nn -= MAX_FRAME_STATS;
-                double render = s->frames[nn].renderTime;
-                if (render < minRender) minRender = render;
-                if (render > maxRender) maxRender = render;
-                double frame = s->frames[nn].frameTime;
-                if (frame < minFrame) minFrame = frame;
-                if (frame > maxFrame) maxFrame = frame;
-                avgRender += render;
-                avgFrame  += frame;
-            }
-            avgRender /= s->numFrames;
-            avgFrame  /= s->numFrames;
-
-            LOGI("frame/s (avg,min,max) = (%.1f,%.1f,%.1f) "
-                 "render time ms (avg,min,max) = (%.1f,%.1f,%.1f)\n",
-                 1000./avgFrame, 1000./maxFrame, 1000./minFrame,
-                 avgRender, minRender, maxRender);
-        }
-        s->numFrames  = 0;
-        s->firstFrame = 0;
-        s->firstTime  = now;
-    }
-
-    nn = s->firstFrame + s->numFrames;
-    if (nn >= MAX_FRAME_STATS)
-        nn -= MAX_FRAME_STATS;
-
-    s->frames[nn].renderTime = renderTime;
-    s->frames[nn].frameTime  = frameTime;
-
-    if (s->numFrames < MAX_FRAME_STATS) {
-        s->numFrames += 1;
-    } else {
-        s->firstFrame += 1;
-        if (s->firstFrame >= MAX_FRAME_STATS)
-            s->firstFrame -= MAX_FRAME_STATS;
-    }
-
-    s->lastTime = now;
-}
-
-/* 3D data. Vertex range -0.5..0.5 in all axes.
- * Z -0.5 is near, 0.5 is far. */
-const float gCubeVertices[] =
-{
-    /* Front face. */
-    /* Bottom left */
-    -0.5,  0.5, -0.5,
-    0.5, -0.5, -0.5,
-    -0.5, -0.5, -0.5,
-    /* Top right */
-    -0.5,  0.5, -0.5,
-    0.5,  0.5, -0.5,
-    0.5, -0.5, -0.5,
-    /* Left face */
-    /* Bottom left */
-    -0.5,  0.5,  0.5,
-    -0.5, -0.5, -0.5,
-    -0.5, -0.5,  0.5,
-    /* Top right */
-    -0.5,  0.5,  0.5,
-    -0.5,  0.5, -0.5,
-    -0.5, -0.5, -0.5,
-    /* Top face */
-    /* Bottom left */
-    -0.5,  0.5,  0.5,
-    0.5,  0.5, -0.5,
-    -0.5,  0.5, -0.5,
-    /* Top right */
-    -0.5,  0.5,  0.5,
-    0.5,  0.5,  0.5,
-    0.5,  0.5, -0.5,
-    /* Right face */
-    /* Bottom left */
-    0.5,  0.5, -0.5,
-    0.5, -0.5,  0.5,
-    0.5, -0.5, -0.5,
-    /* Top right */
-    0.5,  0.5, -0.5,
-    0.5,  0.5,  0.5,
-    0.5, -0.5,  0.5,
-    /* Back face */
-    /* Bottom left */
-    0.5,  0.5,  0.5,
-    -0.5, -0.5,  0.5,
-    0.5, -0.5,  0.5,
-    /* Top right */
-    0.5,  0.5,  0.5,
-    -0.5,  0.5,  0.5,
-    -0.5, -0.5,  0.5,
-    /* Bottom face */
-    /* Bottom left */
-    -0.5, -0.5, -0.5,
-    0.5, -0.5,  0.5,
-    -0.5, -0.5,  0.5,
-    /* Top right */
-    -0.5, -0.5, -0.5,
-    0.5, -0.5, -0.5,
-    0.5, -0.5,  0.5,
-};
-
-const float gCubeColors[] =
-{
-    /* Front face */
-    /* Bottom left */
-    1.0, 0.0, 0.0, /* red */
-    0.0, 0.0, 1.0, /* blue */
-    0.0, 1.0, 0.0, /* green */
-    /* Top right */
-    1.0, 0.0, 0.0, /* red */
-    1.0, 1.0, 0.0, /* yellow */
-    0.0, 0.0, 1.0, /* blue */
-    /* Left face */
-    /* Bottom left */
-    1.0, 1.0, 1.0, /* white */
-    0.0, 1.0, 0.0, /* green */
-    0.0, 1.0, 1.0, /* cyan */
-    /* Top right */
-    1.0, 1.0, 1.0, /* white */
-    1.0, 0.0, 0.0, /* red */
-    0.0, 1.0, 0.0, /* green */
-    /* Top face */
-    /* Bottom left */
-    1.0, 1.0, 1.0, /* white */
-    1.0, 1.0, 0.0, /* yellow */
-    1.0, 0.0, 0.0, /* red */
-    /* Top right */
-    1.0, 1.0, 1.0, /* white */
-    0.0, 0.0, 0.0, /* black */
-    1.0, 1.0, 0.0, /* yellow */
-    /* Right face */
-    /* Bottom left */
-    1.0, 1.0, 0.0, /* yellow */
-    1.0, 0.0, 1.0, /* magenta */
-    0.0, 0.0, 1.0, /* blue */
-    /* Top right */
-    1.0, 1.0, 0.0, /* yellow */
-    0.0, 0.0, 0.0, /* black */
-    1.0, 0.0, 1.0, /* magenta */
-    /* Back face */
-    /* Bottom left */
-    0.0, 0.0, 0.0, /* black */
-    0.0, 1.0, 1.0, /* cyan */
-    1.0, 0.0, 1.0, /* magenta */
-    /* Top right */
-    0.0, 0.0, 0.0, /* black */
-    1.0, 1.0, 1.0, /* white */
-    0.0, 1.0, 1.0, /* cyan */
-    /* Bottom face */
-    /* Bottom left */
-    0.0, 1.0, 0.0, /* green */
-    1.0, 0.0, 1.0, /* magenta */
-    0.0, 1.0, 1.0, /* cyan */
-    /* Top right */
-    0.0, 1.0, 0.0, /* green */
-    0.0, 0.0, 1.0, /* blue */
-    1.0, 0.0, 1.0, /* magenta */
-};
-
-const float gBarVertices[] = 
-{
-    /* Front face. */
-    /* Bottom left */
-    -1.0,  1.0, -0.5,
-    -0.8, -1.0, -0.5,
-    -1.0, -1.0, -0.5,
-    /* Top right */
-    -1.0,  1.0, -0.5,
-    -0.8,  1.0, -0.5,
-    -0.8, -1.0, -0.5,
-};
 
 bool setupGraphics(int w, int h) {
     printGLString("Version", GL_VERSION);
@@ -376,9 +146,13 @@ bool setupGraphics(int w, int h) {
     checkGlError("glGetAttribLocation");
     LOGI("glGetAttribLocation(\"vColor\") = %d\n", gvColorHandle);
 
-    //gIntensityHandle = glGetAttribLocation(gProgram, "intensity");
-    //checkGlError("glGetAttribLocation");
-    //LOGI("glGetAttribLocation(\"intensity\") = %d\n", gIntensityHandle);
+    gAHandle = glGetUniformLocation(gProgram, "A");
+    checkGlError("glGetAttribLocation");
+    LOGI("glGetUniformLocation(\"A\") = %d\n", gAHandle);
+
+    gThetaHandle = glGetUniformLocation(gProgram, "theta");
+    checkGlError("glGetAttribLocation");
+    LOGI("glGetUniformLocation(\"theta\") = %d\n", gThetaHandle);
 
     gmvP = glGetUniformLocation(gProgram, "mvp");
     checkGlError("glGetUniformLocation");
@@ -393,17 +167,17 @@ bool setupGraphics(int w, int h) {
 
     //create a mesh
     gpMesh = new cMesh;
-    gpMesh->buildPlane(3,2,3,2);
-    gpMesh->computeVerticesNormals();
+    gpMesh->buildPlane(2.0,3.4,75,128);
+    //gpMesh->computeVerticesNormals();
     return true;
 }
 
 void renderFrame() {
 	static float grey;
-	grey += 0.01f;
-	if (grey > 1.0f) {
-		grey = 0.0f;
-	}
+	//grey += 0.01f;
+	//if (grey > 1.0f) {
+	//	grey = 0.0f;
+	//}
 	glClearColor(grey, grey, grey, 1.0f);
 	checkGlError("glClearColor");
 	glClear( GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -412,22 +186,22 @@ void renderFrame() {
 	glUseProgram(gProgram);
 	checkGlError("glUseProgram");
 
-	#if USE_MESH
+#if USE_MESH
 	glVertexAttribPointer(gvPositionHandle, 4, GL_FLOAT, GL_FALSE, 0, gpMesh->m_pTriangleList);
-	#else
+#else
 	glVertexAttribPointer(gvPositionHandle, 3, GL_FLOAT, GL_FALSE, 0, gCubeVertices);
-	#endif
+#endif
 
 	glEnableVertexAttribArray(gvPositionHandle);
 	checkGlError("glEnableVertexAttribArray");
 
-	#if USE_MESH
-	glVertexAttribPointer(gvColorHandle, 3, GL_FLOAT, GL_FALSE, 0, gCubeColors); // <-hack! only works for 3X2 mesh
+#if USE_MESH
+	glVertexAttribPointer(gvColorHandle, 3, GL_FLOAT, GL_FALSE, 0, gpMesh->m_pVertexColor);
 	checkGlError("glVertexAttribPointer");
-	#else
+#else
 	glVertexAttribPointer(gvColorHandle, 3, GL_FLOAT, GL_FALSE, 0, gCubeColors);
 	checkGlError("glVertexAttribPointer");
-	#endif
+#endif
 
 	glEnableVertexAttribArray(gvColorHandle);
 	checkGlError("glEnableVertexAttribArray");
@@ -436,24 +210,37 @@ void renderFrame() {
 	//rotate - begin
 	rotate_matrix(iXangle, 1.0, 0.0, 0.0, aModelView);
 	rotate_matrix(iYangle, 0.0, 1.0, 0.0, aRotate);
+	
+	multiply_matrix(aRotate, aModelView, aModelView);
+
+	rotate_matrix(iZangle, 0.0, 0.0, 1.0, aRotate);
 
 	multiply_matrix(aRotate, aModelView, aModelView);
 
-	rotate_matrix(iZangle, 0.0, 1.0, 0.0, aRotate);
-
-	multiply_matrix(aRotate, aModelView, aModelView);
-
-	/* Pull the camera back from the cube */
-	aModelView[14] -= 2.5;
-
+	//Pull the camera back from the geometry
+	aModelView[14] -= 3.5;
+	
+#if USE_MESH
+	//translate to lower left of geometry to lower-left of screen 	
+	aModelView[12] -= 1.0;
+	aModelView[13] -= 1.7;	
+#endif
 	perspective_matrix(45.0, (double)uiWidth/(double)uiHeight, 0.01, 100.0, aPerspective);
 	multiply_matrix(aPerspective, aModelView, aMVP);
 
 	glUniformMatrix4fv(gmvP, 1, GL_FALSE, aMVP);
+	
+	glUniform1f(gAHandle, -1.0*(1.0 - animParam));
+	glUniform1f(gThetaHandle, animParam*_HALF_PI);
+	
+	animParam -= 0.01;
+	if(animParam < 0.0) animParam = 1.0f;
 
-	iXangle += 3;
+#if !USE_MESH
+	//Comment the lines below to disable rotation
+	iZangle += 2;
 	iYangle += 2;
-
+#endif
 	if(iXangle >= 360) iXangle -= 360;
 	if(iXangle < 0) iXangle += 360;
 	if(iYangle >= 360) iYangle -= 360;
@@ -461,6 +248,7 @@ void renderFrame() {
 	if(iZangle >= 360) iZangle -= 360;
 	if(iZangle < 0) iZangle += 360;
 	//rotate - end
+
 #if USE_MESH
 	glDrawArrays(GL_TRIANGLES, 0, gpMesh->m_numTriangles);
 #else
@@ -468,7 +256,7 @@ void renderFrame() {
 #endif
 	checkGlError("glDrawArrays");
 }
-static Stats stats;
+
 extern "C" {
     JNIEXPORT void JNICALL Java_com_android_spinningcube_SpinningCubeLib_init(JNIEnv * env, jobject obj,  jint width, jint height, jstring vShader, jstring fShader);
     JNIEXPORT void JNICALL Java_com_android_spinningcube_SpinningCubeLib_step(JNIEnv * env, jobject obj);
